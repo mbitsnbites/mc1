@@ -42,7 +42,8 @@ architecture rtl of dither is
   constant C_DITHER_BITS : positive := 8 - BITS;
 
   constant C_METHOD_NONE : std_logic_vector(1 downto 0) := "00";
-  constant C_METHOD_WHITE : std_logic_vector(1 downto 0) := "01";
+  constant C_METHOD_ERRDIFF : std_logic_vector(1 downto 0) := "01";
+  constant C_METHOD_WHITE : std_logic_vector(1 downto 0) := "10";
 
   signal s_rnd : std_logic_vector(C_DITHER_BITS-1 downto 0);
   signal s_rnd_r : std_logic_vector(C_DITHER_BITS-1 downto 0);
@@ -64,10 +65,19 @@ architecture rtl of dither is
   signal s_r_unclamped : std_logic_vector(9 downto 0);
   signal s_g_unclamped : std_logic_vector(9 downto 0);
   signal s_b_unclamped : std_logic_vector(9 downto 0);
+  signal s_r_original : std_logic_vector(7 downto 0);
+  signal s_g_original : std_logic_vector(7 downto 0);
+  signal s_b_original : std_logic_vector(7 downto 0);
 
   signal s_next_r : std_logic_vector(BITS-1 downto 0);
   signal s_next_g : std_logic_vector(BITS-1 downto 0);
   signal s_next_b : std_logic_vector(BITS-1 downto 0);
+  signal s_next_r_err : std_logic_vector(C_DITHER_BITS-1 downto 0);
+  signal s_next_g_err : std_logic_vector(C_DITHER_BITS-1 downto 0);
+  signal s_next_b_err : std_logic_vector(C_DITHER_BITS-1 downto 0);
+  signal s_r_err : std_logic_vector(C_DITHER_BITS-1 downto 0);
+  signal s_g_err : std_logic_vector(C_DITHER_BITS-1 downto 0);
+  signal s_b_err : std_logic_vector(C_DITHER_BITS-1 downto 0);
 
   function prng_start_value(k : integer) return std_logic_vector is
     variable v_bits : std_logic_vector(31 downto 0);
@@ -87,6 +97,35 @@ architecture rtl of dither is
     else
       return x(7 downto 8-BITS);
     end if;
+  end function;
+
+  function trunc_error(original : std_logic_vector; truncated : std_logic_vector) return std_logic_vector is
+    variable v_actual : std_logic_vector(7 downto 0);
+    variable v_err : std_logic_vector(7 downto 0);
+  begin
+    -- Translate the truncated value to the full 8-bit range, e.g. "1011" -> "10111011".
+    if BITS = 7 then
+      v_actual := truncated & truncated(6 downto 6);
+    elsif BITS = 6 then
+      v_actual := truncated & truncated(5 downto 4);
+    elsif BITS = 5 then
+      v_actual := truncated & truncated(4 downto 2);
+    elsif BITS = 4 then
+      v_actual := truncated & truncated;
+    elsif BITS = 3 then
+      v_actual := truncated & truncated & truncated(2 downto 1);
+    elsif BITS = 2 then
+      v_actual := truncated & truncated & truncated & truncated;
+    elsif BITS = 1 then
+      v_actual := truncated & truncated & truncated & truncated &
+                  truncated & truncated & truncated & truncated;
+    else
+      v_actual := truncated;
+    end if;
+
+    -- Calculate the delta.
+    v_err := std_logic_vector(signed(original) - signed(v_actual));
+    return v_err(C_DITHER_BITS-1 downto 0);
   end function;
 
 begin
@@ -122,14 +161,17 @@ begin
   -- Select dithering type.
   DitherMuxR: with i_method select
     s_next_dither_r <= s_rnd_r         when C_METHOD_WHITE,
+                       s_r_err         when C_METHOD_ERRDIFF,
                        (others => '0') when others;
 
   DitherMuxG: with i_method select
     s_next_dither_g <= s_rnd_g         when C_METHOD_WHITE,
+                       s_g_err         when C_METHOD_ERRDIFF,
                        (others => '0') when others;
 
   DitherMuxB: with i_method select
     s_next_dither_b <= s_rnd_b         when C_METHOD_WHITE,
+                       s_b_err         when C_METHOD_ERRDIFF,
                        (others => '0') when others;
 
   process(i_rst, i_clk)
@@ -169,10 +211,16 @@ begin
       s_r_unclamped <= (others => '0');
       s_g_unclamped <= (others => '0');
       s_b_unclamped <= (others => '0');
+      s_r_original <= (others => '0');
+      s_g_original <= (others => '0');
+      s_b_original <= (others => '0');
     elsif rising_edge(i_clk) then
       s_r_unclamped <= s_next_r_unclamped;
       s_g_unclamped <= s_next_g_unclamped;
       s_b_unclamped <= s_next_b_unclamped;
+      s_r_original <= i_r;
+      s_g_original <= i_g;
+      s_b_original <= i_b;
     end if;
   end process;
 
@@ -186,16 +234,27 @@ begin
   s_next_g <= clamp_and_trunc(s_g_unclamped);
   s_next_b <= clamp_and_trunc(s_b_unclamped);
 
+  -- Form the truncation error.
+  s_next_r_err <= trunc_error(s_r_original, s_next_r);
+  s_next_g_err <= trunc_error(s_g_original, s_next_g);
+  s_next_b_err <= trunc_error(s_b_original, s_next_b);
+
   process(i_rst, i_clk)
   begin
     if i_rst = '1' then
       o_r <= (others => '0');
       o_g <= (others => '0');
       o_b <= (others => '0');
+      s_r_err <= (others => '0');
+      s_g_err <= (others => '0');
+      s_b_err <= (others => '0');
     elsif rising_edge(i_clk) then
       o_r <= s_next_r;
       o_g <= s_next_g;
       o_b <= s_next_b;
+      s_r_err <= s_next_r_err;
+      s_g_err <= s_next_g_err;
+      s_b_err <= s_next_b_err;
     end if;
   end process;
 end rtl;
