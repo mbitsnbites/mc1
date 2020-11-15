@@ -137,8 +137,7 @@ entity sdram is
     sdram_ras_n : out std_logic;
     sdram_cas_n : out std_logic;
     sdram_we_n  : out std_logic;
-    sdram_dqml  : out std_logic;
-    sdram_dqmh  : out std_logic
+    sdram_dqm   : out std_logic_vector(SDRAM_DATA_WIDTH/8-1 downto 0)
   );
 end sdram;
 
@@ -540,16 +539,16 @@ begin
     -- TODO(m): Add support for other DATA_WIDTH/BURST_LENGTH/etc settings.
     if state = WRITE and wait_counter = 0 then
       sdram_dq <= data_reg(SDRAM_DATA_WIDTH-1 downto 0);
-      sdram_dqmh <= sel_n_reg(1);
-      sdram_dqml <= sel_n_reg(0);
+      sdram_dqm(1) <= sel_n_reg(1);
+      sdram_dqm(0) <= sel_n_reg(0);
     elsif state = WRITE and wait_counter = 1 then
       sdram_dq <= data_reg(SDRAM_DATA_WIDTH*2-1 downto SDRAM_DATA_WIDTH);
-      sdram_dqmh <= sel_n_reg(3);
-      sdram_dqml <= sel_n_reg(2);
+      sdram_dqm(1) <= sel_n_reg(3);
+      sdram_dqm(0) <= sel_n_reg(2);
     else
       sdram_dq <= (others => 'Z');
-      sdram_dqmh <= '0';
-      sdram_dqml <= '0';
+      sdram_dqm(1) <= '0';
+      sdram_dqm(0) <= '0';
     end if;
   end process;
 end architecture arch;
