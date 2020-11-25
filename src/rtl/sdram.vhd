@@ -50,10 +50,6 @@ entity sdram is
     -- Both the clk and clk_in use the same frequency.
     CLK_FREQ : real;
 
-    -- When clk_in is enabled, the clk_in signal is used for sampling the
-    -- sdram_dq signal. Otherwise the clk signal is used.
-    CLK_IN_ENABLE : boolean := false;
-
     -- 32-bit controller interface
     ADDR_WIDTH : natural := 23;
     DATA_WIDTH : natural := 32;
@@ -90,13 +86,6 @@ entity sdram is
 
     -- clock for the controller and the output signals
     clk : in std_logic;
-
-    -- Clock for the input signals (used for sampling sdram_dq). This clock
-    -- should be the same frequency as clk, but with a phase that compensates
-    -- for DQ signal delay. The positive flank of this clock should coincide
-    -- with the optimum DQ signal sample time.
-    -- Required if CLK_IN_ENABLE is true.
-    clk_in : in std_logic := 'X';
 
     -- address bus
     addr : in unsigned(ADDR_WIDTH-1 downto 0);
@@ -172,19 +161,6 @@ architecture arch of sdram is
     -- A10 = '1' -> auto precharge
     return a(SDRAM_ADDR_WIDTH-2 downto 10) & "1" & a(9 downto 0);
   end col2addr;
-
-  -- Number of cycles that the DQ signal is delayed relative to the
-  -- CAS_LATENCY cycle.
-  function extra_read_latency return natural is
-  begin
-    if CLK_IN_ENABLE then
-      -- If we use clk_in for sampling we effectively get an extra
-      -- cycle of delay.
-      return 1;
-    else
-      return 0;
-    end if;
-  end extra_read_latency;
 
   -- Adjust the incoming address to the SDRAM address space (e.g.
   -- from 32-bit word addressing to 16-bit word addressing).
@@ -542,45 +518,28 @@ begin
     end if;
   end process;
 
-  DQ_IN_GEN : if CLK_IN_ENABLE generate
-    -- This is a FF that latches the DQ signal in the clk_in clock domain.
-    process (reset, clk_in)
-    begin
-      if reset = '1' then
-        dq_in <= (others => '0');
-      elsif rising_edge(clk_in) then
-        dq_in <= sdram_dq;
-      end if;
-    end process;
-  else generate
-    -- Just forward the sdram_dq signal without a FF.
-    dq_in <= sdram_dq;
-  end generate;
-
   -- read the next sub-word as it's bursted from the SDRAM
   process (reset, clk)
-    constant C_MAX_BURST_CNT : natural := BURST_LENGTH + extra_read_latency;
-    variable v_burst_cnt : natural range 0 to C_MAX_BURST_CNT := C_MAX_BURST_CNT;
-    variable v_idx : natural;
+    -- Add one extra cycle delay due to SDRAM clock phase diff.
+    constant C_START_CNT : natural := -1;
+    variable v_burst_cnt : natural range C_START_CNT to BURST_LENGTH := BURST_LENGTH;
   begin
     if reset = '1' then
       q_reg <= (others => '0');
       valid <= '0';
     elsif rising_edge(clk) then
-      -- Which sub-word are we currently reading?
       if state = READ and wait_counter = CAS_LATENCY then
-        v_burst_cnt := 0;
-      elsif v_burst_cnt < C_MAX_BURST_CNT then
+        v_burst_cnt := C_START_CNT;
+      elsif v_burst_cnt < BURST_LENGTH then
         v_burst_cnt := v_burst_cnt + 1;
       end if;
 
-      if v_burst_cnt >= extra_read_latency and v_burst_cnt < C_MAX_BURST_CNT then
-        v_idx := v_burst_cnt - extra_read_latency;
-        q_reg(SDRAM_DATA_WIDTH*(v_idx+1)-1 downto SDRAM_DATA_WIDTH*v_idx) <= dq_in;
+      if v_burst_cnt >= 0 and v_burst_cnt < BURST_LENGTH then
+        q_reg(SDRAM_DATA_WIDTH*(v_burst_cnt+1)-1 downto SDRAM_DATA_WIDTH*v_burst_cnt) <= dq_in;
       end if;
 
       -- Was this the final sub-word?
-      if v_burst_cnt = (C_MAX_BURST_CNT - 1) then
+      if v_burst_cnt = (BURST_LENGTH - 1) then
         valid <= '1';
       else
         valid <= '0';
