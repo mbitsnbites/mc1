@@ -279,6 +279,7 @@ architecture arch of sdram is
   alias bank : unsigned(SDRAM_BANK_WIDTH-1 downto 0) is addr_current(SDRAM_COL_WIDTH+SDRAM_ROW_WIDTH+SDRAM_BANK_WIDTH-1 downto SDRAM_COL_WIDTH+SDRAM_ROW_WIDTH);
 
   -- Use fast I/O flip-flops for the SDRAM data in/out signals.
+  attribute useioff of dq_out_en : signal is true;
   attribute useioff of dq_in : signal is true;
   attribute useioff of dq_out : signal is true;
 begin
@@ -521,8 +522,8 @@ begin
   -- read the next sub-word as it's bursted from the SDRAM
   process (reset, clk)
     -- Add one extra cycle delay due to SDRAM clock phase diff.
-    constant C_START_CNT : natural := -1;
-    variable v_burst_cnt : natural range C_START_CNT to BURST_LENGTH := BURST_LENGTH;
+    constant C_START_CNT : integer := -1;
+    variable v_burst_cnt : integer range C_START_CNT to BURST_LENGTH := BURST_LENGTH;
   begin
     if reset = '1' then
       q_reg <= (others => '0');
@@ -552,6 +553,7 @@ begin
     variable v_burst_cnt : natural range 0 to BURST_LENGTH := BURST_LENGTH;
   begin
     if reset = '1' then
+      dq_out_en <= '0';
       dq_out <= (others => '0');
       sdram_dqm <= (others => '0');
     elsif rising_edge(clk) then
@@ -563,9 +565,11 @@ begin
       end if;
 
       if v_burst_cnt < BURST_LENGTH then
+        dq_out_en <= '1';
         dq_out <= data_reg(SDRAM_DATA_WIDTH*(v_burst_cnt+1)-1 downto SDRAM_DATA_WIDTH*v_burst_cnt);
         sdram_dqm <= sel_n_reg((SDRAM_DATA_WIDTH/8)*(v_burst_cnt+1)-1 downto (SDRAM_DATA_WIDTH/8)*v_burst_cnt);
       else
+        dq_out_en <= '0';
         dq_out <= (others => '0');
         sdram_dqm <= (others => '0');
       end if;
@@ -584,22 +588,6 @@ begin
       dq_in <= (others => '0');
     elsif rising_edge(clk) then
       dq_in <= sdram_dq;
-    end if;
-  end process;
-
-  -- Should the DQ port be in input or output mode?
-  process (reset, clk)
-  begin
-    if reset = '1' then
-      dq_out_en <= '0';
-    elsif rising_edge(clk) then
-      if next_state /= state then
-        if next_state = WRITE then
-          dq_out_en <= '1';
-        else
-          dq_out_en <= '0';
-        end if;
-      end if;
     end if;
   end process;
 

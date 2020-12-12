@@ -67,7 +67,6 @@ entity xram_sdram is
     o_wb_err : out std_logic;
 
     -- SDRAM interface.
-    i_sdram_clk_in : in std_logic;
     o_sdram_a : out std_logic_vector(SDRAM_ADDR_WIDTH-1 downto 0);
     o_sdram_ba : out std_logic_vector(SDRAM_BANK_WIDTH-1 downto 0);
     io_sdram_dq : inout std_logic_vector(SDRAM_DATA_WIDTH-1 downto 0);
@@ -148,7 +147,6 @@ begin
   sdram_controller_1: entity work.sdram
     generic map (
       CLK_FREQ => real(CPU_CLK_HZ)*0.000001,
-      CLK_IN_ENABLE => true,
       ADDR_WIDTH => C_ADDR_WIDTH,
       DATA_WIDTH => 32,
       SDRAM_ADDR_WIDTH => SDRAM_ADDR_WIDTH,
@@ -169,7 +167,6 @@ begin
     port map (
       reset  => i_rst,
       clk => i_wb_clk,
-      clk_in => i_sdram_clk_in,
 
       -- CPU/Wishbone interface.
       addr => s_addr,

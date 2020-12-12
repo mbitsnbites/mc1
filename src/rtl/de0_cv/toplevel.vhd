@@ -38,17 +38,17 @@ entity toplevel is
     CLOCK4_50 : in std_logic;
 
     -- DRAM  "3.3-V LVTTL"
+    DRAM_CLK : out std_logic;
+    DRAM_CKE : out std_logic;
     DRAM_ADDR : out std_logic_vector(12 downto 0);
     DRAM_BA : out std_logic_vector(1 downto 0);
-    DRAM_CAS_N : out std_logic;
-    DRAM_CKE : out std_logic;
-    DRAM_CLK : out std_logic;
-    DRAM_CS_N : out std_logic;
     DRAM_DQ : inout std_logic_vector(15 downto 0);
-    DRAM_LDQM : out std_logic;
+    DRAM_CS_N : out std_logic;
     DRAM_RAS_N : out std_logic;
-    DRAM_UDQM : out std_logic;
+    DRAM_CAS_N : out std_logic;
     DRAM_WE_N : out std_logic;
+    DRAM_LDQM : out std_logic;
+    DRAM_UDQM : out std_logic;
 
     -- GPIO "3.3-V LVTTL"
     GPIO_0 : inout std_logic_vector(35 downto 0);
@@ -89,7 +89,7 @@ end toplevel;
 
 architecture rtl of toplevel is
   -- Clock configuration.
-  constant C_USE_GPIO_CLK : boolean := false;
+  constant C_USE_GPIO_CLK : boolean := true;
   constant C_SYSTEM_CLK_HZ : integer := 50_000_000;
 
   -- 70 MHz seems to be a good safe bet, but going higher is certainly possible.
@@ -97,7 +97,17 @@ architecture rtl of toplevel is
 
   -- SDRAM read sample clock is phase-shifted to compensate for signal progpagation delay.
   -- Note: This value has to be chosen carefully (not every value is valid).
-  constant C_SDRAM_CLK_PHASE : time := 3.125 ns;
+  --constant C_SDRAM_CLK_PHASE : time := 2.976 ns;
+  --constant C_SDRAM_CLK_PHASE : time := 3.125 ns;
+  --constant C_SDRAM_CLK_PHASE : time := 5.625 ns;
+
+  --constant C_SDRAM_CLK_PHASE : time := 9673 ps;  -- -4613 ps: 6646
+  --constant C_SDRAM_CLK_PHASE : time := 10.715 ns;  -- -3571 ps: 6646
+
+  -- constant C_SDRAM_CLK_PHASE : time := 7000 ps;
+
+  --constant C_SDRAM_CLK_PHASE : time := (500 ms) / real(C_CPU_CLK_HZ);  -- 180 degrees
+  constant C_SDRAM_CLK_PHASE : time := (750 ms) / real(C_CPU_CLK_HZ);  -- 270 degrees
 
   -- Pixel frequencies for supported video modes:
   --  1920x1080 @ 60 Hz: 148.500 MHz
@@ -121,7 +131,7 @@ architecture rtl of toplevel is
   signal s_vga_rst : std_logic;
   signal s_vga_clk : std_logic;
 
-  signal s_sdram_clk_in : std_logic;
+  signal s_sdram_clk : std_logic;
   signal s_xram_cyc : std_logic;
   signal s_xram_stb : std_logic;
   signal s_xram_adr : std_logic_vector(29 downto 0);
@@ -168,7 +178,7 @@ begin
   pll_cpu: entity work.pll
     generic map (
       REFERENCE_CLOCK_FREQUENCY => C_SYSTEM_CLK_HZ,
-      NUMBER_OF_CLOCKS => 3,
+      NUMBER_OF_CLOCKS => 4,
       OUTPUT_CLOCK_FREQUENCY0 => C_CPU_CLK_HZ,
       OUTPUT_CLOCK_FREQUENCY1 => C_CPU_CLK_HZ,
       PHASE_SHIFT1 => C_SDRAM_CLK_PHASE,
@@ -179,7 +189,7 @@ begin
       i_rst => s_system_rst,
       i_refclk => s_system_clk,
       o_clk0 => s_cpu_clk,
-      o_clk1 => s_sdram_clk_in,
+      o_clk1 => s_sdram_clk,
       o_clk2 => s_vga_ref_clk,
       o_locked => s_pll_cpu_locked
     );
@@ -267,7 +277,7 @@ begin
 
   -- XRAM - We use the on-board 32Mx16 SDRAM as XRAM.
   -- Configuration according to ISSI IS42S163220F-7TL specs.
-  DRAM_CLK <= s_cpu_clk;
+  DRAM_CLK <= s_sdram_clk;
   xram_1: entity work.xram_sdram
     generic map (
       CPU_CLK_HZ => C_CPU_CLK_HZ,
@@ -282,8 +292,8 @@ begin
       T_RC => 60.0,
       T_RCD => 15.0,
       T_RP => 15.0,
-      T_WR => 14.0,                         -- Same as t_DPL?
-      T_REFI => 7812.5                      -- 8192 refreshes / 64 ms
+      T_WR => 25.0,                         -- Same as t_DPL?
+      T_REFI => 10000.0                      -- 64 ms / 8192 refreshes = 5000.0 ns / refresh
     )
     port map (
       i_rst  => s_cpu_rst,
@@ -300,7 +310,6 @@ begin
       o_wb_stall => s_xram_stall,
       o_wb_err => s_xram_err,
 
-      i_sdram_clk_in => s_sdram_clk_in,
       o_sdram_a => DRAM_ADDR,
       o_sdram_ba => DRAM_BA,
       io_sdram_dq => DRAM_DQ,

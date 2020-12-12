@@ -44,7 +44,7 @@ architecture tb of mc1_tb is
   -- (800 + hblank) x (600 + vblank) = 663168 cycles per frame
   -- (1280 + hblank) x (720 + vblank) = 1237500 cycles per frame
   -- (1920 + hblank) x (1080 + vblank) = 2475000 cycles per frame
-  constant C_TEST_CYCLES : integer := 2475000 * C_TEST_FRAMES;
+  constant C_TEST_CYCLES : integer := 800;  -- 2475000 * C_TEST_FRAMES;
 
   -- 1920x1080: 148.500 MHz
   constant C_CPU_CLK_HZ : positive := 148_500_000;
@@ -69,7 +69,7 @@ architecture tb of mc1_tb is
   signal s_xram_stall : std_logic;
   signal s_xram_err : std_logic;
 
-  signal s_sdram_clk_in : std_logic;
+  signal s_sdram_clk : std_logic;
   signal s_sdram_addr : std_logic_vector(12 downto 0);
   signal s_sdram_ba : std_logic_vector(1 downto 0);
   signal s_sdram_dq : std_logic_vector(15 downto 0);
@@ -159,7 +159,6 @@ begin
       o_wb_stall => s_xram_stall,
       o_wb_err => s_xram_err,
 
-      i_sdram_clk_in => s_sdram_clk_in,
       o_sdram_a => s_sdram_addr,
       o_sdram_ba => s_sdram_ba,
       io_sdram_dq => s_sdram_dq,
@@ -173,28 +172,32 @@ begin
 
   -- Simple simulation of the behaviour of an SDRAM (just respond with some
   -- data for read requests).
-  sdram_sim : process(s_clk)
+  sdram_sim : process(s_sdram_clk)
     variable v_count : integer range 1 to 8 := 8;
     variable v_data : std_logic_vector(15 downto 0) := (others => '0');
     variable v_cmd : std_logic_vector(2 downto 0);
   begin
-    if rising_edge(s_clk) then
+    if rising_edge(s_sdram_clk) then
       v_cmd := s_sdram_ras_n & s_sdram_cas_n & s_sdram_we_n;
-      if v_cmd = "101" then     -- read
+      if v_cmd = "101" then      -- READ
         v_count := 1;
-      elsif v_cmd = "011" then  -- active
+      elsif v_cmd /= "111" then  -- !NOP
         v_count := 8;
       elsif v_count < 8 then
         v_count := v_count + 1;
       end if;
-      -- We respond in read cycles 3 to 4 (CAS_LATENCY=2, BURST_LENGTH=2, READ_SAMPLE_DELAY=1).
-      s_sdram_dq <= v_data when (v_count >= 3 and v_count <= 4) else (others => 'Z');
+      -- We respond in read cycles 3 to 4 (CAS_LATENCY=2, BURST_LENGTH=2).
+      if v_count >= 3 and v_count <= 4 then
+        s_sdram_dq <= v_data;
+      else
+        s_sdram_dq <= (others => 'Z');
+      end if;
       v_data := std_logic_vector(unsigned(v_data) + 12345);
     end if;
   end process;
 
-  -- The SDRAM sample clock is 180 degrees phase delayed (for simplicity).
-  s_sdram_clk_in <= not s_clk;
+  -- The SDRAM clock is 180 degrees phase delayed (for simplicity).
+  s_sdram_clk <= not s_clk;
 
   main : process
     -- File I/O.
